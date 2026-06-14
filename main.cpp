@@ -4,72 +4,121 @@
 #include <string.h>
 #include <dlfcn.h>
 #include <stdio.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include "dobby.h"
+#include <stdlib.h>
+#include <sys/mman.h>
 
-#define LOG_TAG "BYPASS"
+#define LOG_TAG "BYPASS_DUMPER"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 
-pid_t (*orig_fork)();
 int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
+bool is_dumped = false;
 
-pid_t anti_cheat_child_pid = 0;
-
-pid_t my_fork() {
-    if (!orig_fork) return 0;
+void dump_library(const char* lib_name, uintptr_t start_addr, uintptr_t end_addr) {
+    char out_path[256];
+    snprintf(out_path, sizeof(out_path), "/data/data/com.catsbit.oxidesurvivalisland/files/%s.dump.so", lib_name);
     
-    pid_t actual_pid = orig_fork();
+    size_t size = end_addr - start_addr;
+    LOGI("[+] Dumping %s [0x%lx - 0x%lx] (%zu bytes) -> %s", lib_name, start_addr, end_addr, size, out_path);
     
-    if (actual_pid == 0) {
-        return 0;
+    FILE* out = fopen(out_path, "wb");
+    if (!out) {
+        snprintf(out_path, sizeof(out_path), "/data/data/com.catsbit.oxidesurvivalisland/%s.dump.so", lib_name);
+        out = fopen(out_path, "wb");
+    }
+    
+    if (out) {
+        fwrite((void*)start_addr, 1, size, out);
+        fclose(out);
+        LOGI("[🏆] Memory dump for %s successfully saved!", lib_name);
     } else {
-        anti_cheat_child_pid = actual_pid;
-        return actual_pid;
+        LOGW("[-] Failed to open output file for writing target: %s", lib_name);
     }
 }
 
-int (*orig_kill)(pid_t pid, int sig);
-int my_kill(pid_t pid, int sig) {
-    if (sig == 4 || sig == 9 || sig == 11) {
-        if (orig_log_buf_write) {
-            char buf[128];
-            snprintf(buf, sizeof(buf), "🛡️ [SIGNAL BLOCK] Античит пытался послать сигнал %d процессу %d. БЛОКИРУЕМ!", sig, pid);
-            orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", buf);
+void dump_all_loaded_libraries() {
+    FILE* maps = fopen("/proc/self/maps", "r");
+    if (!maps) {
+        LOGW("[-] Unable to open /proc/self/maps");
+        return;
+    }
+
+    char line[512];
+    char last_lib[256] = {0};
+    uintptr_t lib_start = 0;
+    uintptr_t lib_end = 0;
+
+    LOGI("[*] Analyzing process memory layout via /proc/self/maps...");
+
+    while (fgets(line, sizeof(line), maps)) {
+        if (strstr(line, ".so") != nullptr && 
+           (strstr(line, "com.catsbit") != nullptr || strstr(line, "/data/app") != nullptr)) {
+            
+            uintptr_t start, end;
+            char perms[5];
+            char path[256];
+            
+            if (sscanf(line, "%lx-%lx %4s %*s %*s %*s %255s", &start, &end, perms, path) == 4) {
+                char* lib_filename = strrchr(path, '/');
+                if (lib_filename) lib_filename++;
+                else lib_filename = path;
+
+                if (strstr(lib_filename, "liboxide_bypass.so") != nullptr) continue;
+
+                if (strcmp(last_lib, lib_filename) == 0) {
+                    lib_end = end;
+                } else {
+                    if (lib_start != 0 && lib_end > lib_start) {
+                        dump_library(last_lib, lib_start, lib_end);
+                    }
+                    strncpy(last_lib, lib_filename, sizeof(last_lib));
+                    lib_start = start;
+                    lib_end = end;
+                }
+            }
         }
-        return 0;
     }
-    if (orig_kill) {
-        return orig_kill(pid, sig);
+
+    if (lib_start != 0 && lib_end > lib_start) {
+        dump_library(last_lib, lib_start, lib_end);
     }
-    return -1;
+
+    fclose(maps);
+    LOGI("[+] Complete process memory dumping procedure finished!");
 }
 
+// Intercepting logger hook function
 int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) {
-    if (orig_log_buf_write) {
-        if (tag && strstr(tag, "SelfProtect") != nullptr) {
-            return orig_log_buf_write(bufID, priority, "BYPASS_AC", msg);
+    if (msg && !is_dumped) {
+        if (strstr(msg, "starting self-protect") != nullptr) {
+            is_dumped = true;
+            
+            if (orig_log_buf_write) {
+                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "⚠️ [DUMPER TRIGGERED] Target log message captured! Executing memory dump in 500ms...");
+            }
+            
+            usleep(500000); 
+            
+            dump_all_loaded_libraries();
         }
+    }
+
+    if (orig_log_buf_write) {
         return orig_log_buf_write(bufID, priority, tag, msg);
     }
     return 0;
 }
 
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-    LOGI("[+] INITIALIZING ANTI-SIGNAL BYPASS LAYER");
+extern "C" jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOGI("[+] INITIALIZING AUTOMATIC LOGGER TRAP BYPASS LAYER");
 
-    void* fork_addr = DobbySymbolResolver("libc.so", "fork");
-    if (fork_addr) {
-        DobbyHook(fork_addr, (void*)my_fork, (void**)&orig_fork);
+    void* log_addr = dlsym(dlopen("liblog.so", RTLD_NOW), "__android_log_buf_write");
+    if (!log_addr) {
+        log_addr = dlsym(RTLD_DEFAULT, "__android_log_buf_write");
     }
 
-    void* kill_addr = DobbySymbolResolver("libc.so", "kill");
-    if (kill_addr) {
-        DobbyHook(kill_addr, (void*)my_kill, (void**)&orig_kill);
-    }
-
-    void* log_addr = DobbySymbolResolver("liblog.so", "__android_log_buf_write");
     if (log_addr) {
+        extern int DobbyHook(void* target, void* replace, void** origin);
         DobbyHook(log_addr, (void*)my_log_buf_write, (void**)&orig_log_buf_write);
     }
 
