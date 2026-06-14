@@ -5,19 +5,19 @@
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 #include <stdint.h>
 #include "dobby.h"
 
-#define LOG_TAG "BYPASS_X11"
+#define LOG_TAG "BYPASS_SCAN"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
+int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
 uintptr_t libstub_base = 0;
+bool scanned = false;
 
 uintptr_t get_module_base(const char* module_name) {
     FILE* maps = fopen("/proc/self/maps", "r");
     if (!maps) return 0;
-
     char line[512];
     uintptr_t base = 0;
     while (fgets(line, sizeof(line), maps)) {
@@ -30,49 +30,52 @@ uintptr_t get_module_base(const char* module_name) {
     return base;
 }
 
-void sub_5FA64_instrument_callback(void* address, DobbyRegisterContext* ctx) {
-    uintptr_t* raw_regs = (uintptr_t*)ctx;
-    uintptr_t x11_value = raw_regs[11];
-    
+void inspect_memory_safely() {
     if (libstub_base == 0) {
         libstub_base = get_module_base("libstub.so");
     }
+    
+    if (libstub_base == 0) {
+        LOGI("[-] libstub.so не найдена в maps в данный момент.");
+        return;
+    }
 
-    if (libstub_base != 0 && x11_value >= libstub_base) {
-        uintptr_t ida_offset = x11_value - libstub_base;
-        __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "🎯 [X11 TRACER] Абсолютный адрес: 0x%lx | Смещение в IDA: 0x%lx", x11_value, ida_offset);
-    } else {
-        Dl_info info;
-        if (dladdr((void*)x11_value, &info) && info.dli_fname) {
-            uintptr_t diff = x11_value - (uintptr_t)info.dli_fbase;
-            __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "🎯 [X11 TRACER] Вызов внешнего модуля: %s (Offset: 0x%lx)", info.dli_fname, diff);
-        } else {
-            __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "🎯 [X11 TRACER] Неизвестный регион / Куча: 0x%lx", x11_value);
-        }
+    uintptr_t target_address = libstub_base + 0x5FA64;
+    LOGI("[+] База libstub.so: 0x%lx | Целевой адрес: 0x%lx", libstub_base, target_address);
+
+    uint32_t* code_ptr = (uint32_t*)target_address;
+    
+    LOGI("[👀] Снимок инструкций по смещению 0x5FA64:");
+    for (int i = 0; i < 8; i++) {
+        LOGI("    Address: 0x%lx | Opcode: 0x%08X", target_address + (i * 4), code_ptr[i]);
     }
 }
 
-void* interception_thread(void* arg) {
-    LOGI("[*] Фоновый поток запущен. Ожидаем загрузку libstub.so...");
-    
-    while (libstub_base == 0) {
-        libstub_base = get_module_base("libstub.so");
-        usleep(5000);
+int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) {
+    if (msg && !scanned) {
+        if (strstr(msg, "starting self-protect") != nullptr) {
+            scanned = true;
+            
+            int ret = orig_log_buf_write(bufID, priority, tag, msg);
+            
+            LOGI("[🎯] Сработал триггер лога! Код расшифрован. Начинаем чтение...");
+            inspect_memory_safely();
+            
+            return ret;
+        }
     }
-    
-    LOGI("[+] libstub.so обнаружена по адресу: 0x%lx. Устанавливаем инструмент...", libstub_base);
-    
-    uintptr_t target_func = libstub_base + 0x5FA64;
-    
-    DobbyInstrument((void*)target_func, sub_5FA64_instrument_callback);
-    LOGI("[🏆] Инструмент на sub_5FA64 (BR X11) успешно установлен!");
-    
-    return nullptr;
+
+    if (orig_log_buf_write) {
+        return orig_log_buf_write(bufID, priority, tag, msg);
+    }
+    return 0;
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-    pthread_t th;
-    pthread_create(&th, nullptr, interception_thread, nullptr);
+    void* log_addr = DobbySymbolResolver("liblog.so", "__android_log_buf_write");
+    if (log_addr) {
+        DobbyHook(log_addr, (void*)my_log_buf_write, (void**)&orig_log_buf_write);
+    }
 
     return JNI_VERSION_1_6;
 }
