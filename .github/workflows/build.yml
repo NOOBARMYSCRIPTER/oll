@@ -15,7 +15,7 @@ jobs:
 
     - name: Download Prebuilt Dobby
       run: |
-        mkdir -id dobby_prebuilt
+        mkdir -p dobby_prebuilt
         curl -L "https://github.com/thedangcoder/Dobby/releases/download/latest/dobby-android-all.tar.gz" -o dobby.tar.gz
         tar -xzf dobby.tar.gz -C dobby_prebuilt
         echo "[+] Prebuilt Dobby successfully downloaded and extracted!"
