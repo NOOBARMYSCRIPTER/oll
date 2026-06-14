@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unwind.h>
 #include <dlfcn.h>
+#include <stdio.h>
 #include "dobby.h"
 
 #define LOG_TAG "BYPASS"
