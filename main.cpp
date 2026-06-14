@@ -15,6 +15,7 @@ struct BacktraceState {
     void** end;
 };
 
+int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
 pid_t (*orig_fork)();
 
 pid_t my_fork() {
@@ -70,8 +71,6 @@ size_t capture_backtrace(void** buffer, size_t max_lines) {
     _Unwind_Backtrace(unwind_callback, &state);
     return state.current - buffer;
 }
-
-int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
 
 int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) {
     if (orig_log_buf_write) {
