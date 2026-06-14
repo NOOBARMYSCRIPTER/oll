@@ -51,12 +51,44 @@ void dump_all_loaded_libraries() {
     LOGI("[*] Analyzing process memory layout via /proc/self/maps...");
 
     while (fgets(line, sizeof(line), maps)) {
-        if (strstr(line, ".so") != nullptr && 
-           (strstr(line, "com.catsbit") != nullptr || strstr(line, "/data/app") != nullptr)) {
-            
+        bool is_valid_region = (strstr(line, ".so") != nullptr || strstr(line, "anon:") != nullptr || (strstr(line, "/") == nullptr && strstr(line, " ") != nullptr));
+        
+        if (is_valid_region && lib_start != 0) {
             uintptr_t start, end;
             char perms[5];
-            char path[256];
+            char path[256] = {0};
+            
+            int parsed = sscanf(line, "%lx-%lx %4s %*s %*s %*s %255s", &start, &end, perms, path);
+            if (parsed >= 3) {
+                if (strlen(path) > 0 && strstr(path, ".so") != nullptr) {
+                    if (strstr(path, "com.catsbit") == nullptr && strstr(path, "/data/app") == nullptr) {
+                        continue;
+                    }
+                    
+                    char* lib_filename = strrchr(path, '/');
+                    if (lib_filename) lib_filename++;
+                    else lib_filename = path;
+
+                    if (strstr(lib_filename, "liboxide_bypass.so") != nullptr) continue;
+
+                    if (strcmp(last_lib, lib_filename) == 0) {
+                        lib_end = end;
+                    } else {
+                        if (lib_start != 0 && lib_end > lib_start) {
+                            dump_library(last_lib, lib_start, lib_end);
+                        }
+                        strncpy(last_lib, lib_filename, sizeof(last_lib));
+                        lib_start = start;
+                        lib_end = end;
+                    }
+                } else if (lib_start != 0 && last_lib[0] !=  '\0') {
+                    lib_end = end;
+                }
+            }
+        } else if (strstr(line, ".so") != nullptr && (strstr(line, "com.catsbit") != nullptr || strstr(line, "/data/app") != nullptr)) {
+            uintptr_t start, end;
+            char perms[5];
+            char path[256] = {0};
             
             if (sscanf(line, "%lx-%lx %4s %*s %*s %*s %255s", &start, &end, perms, path) == 4) {
                 char* lib_filename = strrchr(path, '/');
@@ -65,16 +97,9 @@ void dump_all_loaded_libraries() {
 
                 if (strstr(lib_filename, "liboxide_bypass.so") != nullptr) continue;
 
-                if (strcmp(last_lib, lib_filename) == 0) {
-                    lib_end = end;
-                } else {
-                    if (lib_start != 0 && lib_end > lib_start) {
-                        dump_library(last_lib, lib_start, lib_end);
-                    }
-                    strncpy(last_lib, lib_filename, sizeof(last_lib));
-                    lib_start = start;
-                    lib_end = end;
-                }
+                strncpy(last_lib, lib_filename, sizeof(last_lib));
+                lib_start = start;
+                lib_end = end;
             }
         }
     }
@@ -87,7 +112,6 @@ void dump_all_loaded_libraries() {
     LOGI("[+] Complete process memory dumping procedure finished!");
 }
 
-// Intercepting logger hook function
 int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) {
     if (msg && !is_dumped) {
         if (strstr(msg, "starting self-protect") != nullptr) {
@@ -109,7 +133,7 @@ int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) 
     return 0;
 }
 
-extern "C" jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
     LOGI("[+] INITIALIZING AUTOMATIC LOGGER TRAP BYPASS LAYER");
 
     void* log_addr = dlsym(dlopen("liblog.so", RTLD_NOW), "__android_log_buf_write");
