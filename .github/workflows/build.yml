@@ -20,12 +20,6 @@ jobs:
         path: dobby
         submodules: recursive
 
-    - name: Patch Dobby Assembly Syntax
-      run: |
-        sed -i 's/common_closure_bridge_handler@PAGEOFF/:lo12:common_closure_bridge_handler/g' dobby/source/TrampolineBridge/ClosureTrampolineBridge/arm64/closure_bridge_arm64.asm
-        sed -i 's/common_closure_bridge_handler@PAGE/:pg_hi21:common_closure_bridge_handler/g' dobby/source/TrampolineBridge/ClosureTrampolineBridge/arm64/closure_bridge_arm64.asm
-        echo "[+] Dobby assembly syntax successfully converted to ELF format for Android Clang!"
-
     - name: Configure CMake
       run: |
         rm -rf build
