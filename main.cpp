@@ -2,7 +2,6 @@
 #include <unistd.h>
 #include <android/log.h>
 #include <string.h>
-#include <unwind.h>
 #include <dlfcn.h>
 #include <stdio.h>
 #include "dobby.h"
@@ -10,58 +9,46 @@
 #define LOG_TAG "BYPASS"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-struct BacktraceState {
-    void** current;
-    void** end;
-};
-
 int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
 pid_t (*orig_fork)();
 
-_Unwind_Reason_Code unwind_callback(struct _Unwind_Context* context, void* arg) {
-    BacktraceState* state = static_cast<BacktraceState*>(arg);
-    uintptr_t pc = _Unwind_GetIP(context);
-    
-    if (pc) {
-        if (state->current == state->end) {
-            return _URC_END_OF_STACK;
-        } else {
-            *state->current++ = reinterpret_cast<void*>(pc);
-        }
-    }
-    return _URC_NO_REASON;
-}
-
-size_t capture_backtrace(void** buffer, size_t max_lines) {
-    BacktraceState state = {buffer, buffer + max_lines};
-    _Unwind_Backtrace(unwind_callback, &state);
-    return state.current - buffer;
-}
-
 pid_t my_fork() {
     if (orig_log_buf_write) {
-        orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", "[+] ============ FORK BACKTRACE START ============");
+        orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", "[+] ============ SCANNING STACK FOR CALLER ============");
+
+        // Get the current Stack Pointer (SP) on ARM64
+        register uintptr_t* sp __asm__("sp");
         
-        const size_t max_lines = 15;
-        void* buffer[max_lines];
-        size_t frames = capture_backtrace(buffer, max_lines);
-        
-        for (size_t i = 0; i < frames; i++) {
-            Dl_info info;
-            char line_buf[512];
-            
-            if (dladdr(buffer[i], &info) && info.dli_fname) {
-                uintptr_t offset = (uintptr_t)buffer[i] - (uintptr_t)info.dli_fbase;
-                snprintf(line_buf, sizeof(line_buf), "  #%02zu PC 0x%lx  %s (IDA Offset: 0x%lx) %s", 
-                         i, (uintptr_t)buffer[i], info.dli_fname, offset, 
-                         info.dli_sname ? info.dli_sname : "");
-            } else {
-                snprintf(line_buf, sizeof(line_buf), "  #%02zu PC 0x%lx  [Houdini/Unknown Region]", 
-                         i, (uintptr_t)buffer[i]);
+        // Scan the next 128 pointers up the stack
+        size_t scan_depth = 128;
+        size_t found_frames = 0;
+
+        for (size_t i = 0; i < scan_depth; i++) {
+            uintptr_t possible_pc = sp[i];
+
+            // Verify if the address looks like executable code in user space
+            if (possible_pc > 0x0000000001000000 && possible_pc < 0x0000ffffffffffff) {
+                Dl_info info;
+                if (dladdr((void*)possible_pc, &info) && info.dli_fname) {
+                    
+                    // Filter out our own bypass library and the system libc
+                    if (strstr(info.dli_fname, "liboxide_bypass.so") == nullptr && 
+                        strstr(info.dli_fname, "libc.so") == nullptr) {
+                        
+                        uintptr_t offset = possible_pc - (uintptr_t)info.dli_fbase;
+                        char line_buf[512];
+                        snprintf(line_buf, sizeof(line_buf), "  🎯 Found offset: %s (IDA Offset: 0x%lx)", 
+                                 info.dli_fname, offset);
+                        
+                        orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", line_buf);
+                        found_frames++;
+                        
+                        if (found_frames >= 5) break; // First few matches are sufficient
+                    }
+                }
             }
-            orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", line_buf);
         }
-        orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", "[+] ============= FORK BACKTRACE END =============");
+        orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", "[+] ===================================================");
     }
 
     if (!orig_fork) return 0;
