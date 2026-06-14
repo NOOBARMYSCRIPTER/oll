@@ -81,19 +81,20 @@ int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) 
     return orig_log_buf_write(bufID, priority, tag, msg);
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_stub_StubApplication_initBypass(JNIEnv* env, jclass clazz) {
-    LOGI("[+] ИНИЦИАЛИЗАЦИЯ ХУКОВ ИЗ JAVA СЛОЯ (БЕЗОПАСНЫЙ ТАЙМИНГ)");
+JEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOGI("[+] AUTO-INITIALIZING HOOKS VIA JNI_ONLOAD (HOUDINI STABLE)");
 
     void* fork_addr = DobbySymbolResolver("libc.so", "fork");
     if (fork_addr) {
         DobbyHook(fork_addr, (void*)my_fork, (void**)&orig_fork);
-        LOGI("[+] Хук на fork() успешно установлен.");
+        LOGI("[+] Native hook on fork() successfully installed.");
     }
 
     void* log_addr = DobbySymbolResolver("liblog.so", "__android_log_buf_write");
     if (log_addr) {
         DobbyHook(log_addr, (void*)my_log_buf_write, (void**)&orig_log_buf_write);
-        LOGI("[+] Хук на __android_log_buf_write успешно установлен.");
+        LOGI("[+] Native hook on __android_log_buf_write successfully installed.");
     }
+
+    return JNI_VERSION_1_6;
 }
