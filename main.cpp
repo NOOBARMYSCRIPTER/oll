@@ -10,22 +10,41 @@
 #define LOG_TAG "BYPASS"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-pid_t (*orig_fork)();
-
 struct BacktraceState {
     void** current;
     void** end;
 };
 
+int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
+pid_t (*orig_fork)();
+
 pid_t my_fork() {
+    void* return_address = __builtin_return_address(0);
+    
+    if (orig_log_buf_write) {
+        Dl_info info;
+        if (dladdr(return_address, &info) && info.dli_fname) {
+            uintptr_t offset = (uintptr_t)return_address - (uintptr_t)info.dli_fbase;
+            char fork_buf;
+            snprintf(fork_buf, sizeof(fork_buf), 
+                     "🚨 [FORK DETECTED] Called fork() from: %s (IDA Offset: 0x%lx)", 
+                     info.dli_fname, offset);
+            orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", fork_buf);
+        } else {
+            char fork_buf;
+            snprintf(fork_buf, sizeof(fork_buf), "🚨 [FORK DETECTED] Raw caller address: %p", return_address);
+            orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", fork_buf);
+        }
+    }
+
     if (!orig_fork) return 0;
     pid_t res = orig_fork();
-    
     if (res > 0) {
-        LOGI("🚨 [NATIVE FORK] Intercepted fork process (PID: %d). Spoofing return value to 0!", res);
+        if (orig_log_buf_write) {
+            orig_log_buf_write(0, ANDROID_LOG_INFO, "BYPASS", "🚨 [NATIVE FORK] Spoofing child process PID to 0!");
+        }
         return 0;
     }
-    
     return res;
 }
 
@@ -52,32 +71,6 @@ size_t capture_backtrace(void** buffer, size_t max_lines) {
 int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
 
 int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) {
-    if (tag && msg) {
-        if (strstr(tag, "SelfProtect") != nullptr || strstr(msg, "fork") != nullptr) {
-            if (orig_log_buf_write) {
-                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] ==========================================");
-                orig_log_buf_write(bufID, priority, tag, msg);
-
-                void* return_address = __builtin_return_address(0); 
-                
-                Dl_info info;
-                if (dladdr(return_address, &info) && info.dli_fname) {
-                    uintptr_t offset = (uintptr_t)return_address - (uintptr_t)info.dli_fbase;
-                    char direct_call_buf[512];
-                    snprintf(direct_call_buf, sizeof(direct_call_buf), 
-                             "[+] TRUE ANTI-CHEAT CALL FROM: %s (IDA Offset: 0x%lx)", 
-                             info.dli_fname, offset);
-                    orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", direct_call_buf);
-                } else {
-                    char direct_call_buf[128];
-                    snprintf(direct_call_buf, sizeof(direct_call_buf), "[+] Raw caller address: %p", return_address);
-                    orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", direct_call_buf);
-                }
-                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] ==========================================");
-            }
-        }
-    }
-    
     if (orig_log_buf_write) {
         return orig_log_buf_write(bufID, priority, tag, msg);
     }
