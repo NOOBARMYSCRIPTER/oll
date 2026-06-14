@@ -39,7 +39,9 @@ uintptr_t get_module_base(const char* module_name) {
 }
 
 void sub_5FA64_instrument_callback(void* address, DobbyRegisterContext* ctx) {
-    uintptr_t x11_value = ctx->general.regs[11];
+    uintptr_t* raw_regs = (uintptr_t*)ctx;
+    
+    uintptr_t x11_value = raw_regs[11];
     
     if (libstub_base == 0) {
         libstub_base = get_module_base("libstub.so");
