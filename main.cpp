@@ -85,13 +85,13 @@ __attribute__((constructor)) void init() {
 
     void* fork_addr = DobbySymbolResolver(nullptr, "fork");
     if (fork_addr) {
-        DobbyHook(fork_addr, (dobby_dummy_func_t)my_fork, (dobby_dummy_func_t*)&orig_fork);
+        DobbyHook(fork_addr, (void*)my_fork, (void**)&orig_fork);
         LOGI("[+] Native hook on fork() successfully installed.");
     }
 
     void* log_addr = DobbySymbolResolver("liblog.so", "__android_log_buf_write");
     if (log_addr) {
-        DobbyHook(log_addr, (dobby_dummy_func_t)my_log_buf_write, (dobby_dummy_func_t*)&orig_log_buf_write);
+        DobbyHook(log_addr, (void*)my_log_buf_write, (void**)&orig_log_buf_write);
         LOGI("[+] Native hook on __android_log_buf_write successfully installed.");
     }
 }
