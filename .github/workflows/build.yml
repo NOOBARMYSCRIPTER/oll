@@ -25,9 +25,9 @@ jobs:
 
     - name: Patch Dobby Assembly Syntax
       run: |
-        find build/ -name "closure_bridge_arm64.asm" -exec sed -i 's/@PAGEOFF//g' {} +
-        find build/ -name "closure_bridge_arm64.asm" -exec sed -i 's/@PAGE//g' {} +
-        echo "[+] Dobby assembly syntax successfully patched for Android Clang!"
+        find build/ -name "closure_bridge_arm64.asm" -exec sed -i 's/common_closure_bridge_handler@PAGEOFF/:lo12:common_closure_bridge_handler/g' {} +
+        find build/ -name "closure_bridge_arm64.asm" -exec sed -i 's/common_closure_bridge_handler@PAGE/:pg_hi21:common_closure_bridge_handler/g' {} +
+        echo "[+] Dobby assembly syntax successfully converted to ELF format!"
 
     - name: Build Library
       run: |
