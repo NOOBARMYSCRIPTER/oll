@@ -5,15 +5,60 @@
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <stdint.h>
 #include "dobby.h"
 
-#define LOG_TAG "BYPASS_SCAN"
+#define LOG_TAG "BYPASS_FINAL"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
 uintptr_t libstub_base = 0;
-bool scanned = false;
+
+uint32_t original_br_x11 = 0xD61F0160; 
+
+void* (*orig_sub_8C894)(void* result, unsigned int* data_block);
+unsigned int fake_block[16];
+
+void* my_sub_8C894(void* result, unsigned int* data_block) {
+    uintptr_t current_block_addr = (uintptr_t)data_block;
+    uintptr_t target_patched_addr = libstub_base + 0x5FB88;
+
+    if (current_block_addr <= target_patched_addr && target_patched_addr < (current_block_addr + 64)) {
+        memcpy(fake_block, data_block, 64);
+        size_t offset_in_block = (target_patched_addr - current_block_addr) / sizeof(unsigned int);
+        
+        fake_block[offset_in_block] = original_br_x11;
+        
+        __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "🛡️ [CRC BYPASS] Скрыли патч на 0x5FB88 от SHA-256 сканера");
+        
+        return orig_sub_8C894(result, fake_block);
+    }
+
+    return orig_sub_8C894(result, data_block);
+}
+
+void loc_5FB88_instrument_callback(void* address, DobbyRegisterContext* ctx) {
+    uintptr_t* raw_regs = (uintptr_t*)ctx;
+
+    uintptr_t x11_target = raw_regs[11];
+    
+    if (libstub_base == 0) {
+        libstub_base = get_module_base("libstub.so");
+    }
+
+    if (libstub_base != 0 && x11_target >= libstub_base) {
+        uintptr_t ida_offset = x11_target - libstub_base;
+        __android_log_print(ANDROID_LOG_ERROR, "🏆 UNPACK_SUCCESS", "🎯 АНТИЧИТ ПРЫГАЕТ НА СМЕЩЕНИЕ В IDA: 0x%lx (Абс: 0x%lx)", ida_offset, x11_target);
+    } else {
+        Dl_info info;
+        if (dladdr((void*)x11_target, &info) && info.dli_fname) {
+            uintptr_t diff = x11_target - (uintptr_t)info.dli_fbase;
+            __android_log_print(ANDROID_LOG_ERROR, "🏆 UNPACK_SUCCESS", "🎯 ПРЫЖОК В ДРУГУЮ ЛИБУ: %s (Смещение: 0x%lx)", info.dli_fname, diff);
+        } else {
+            __android_log_print(ANDROID_LOG_ERROR, "🏆 UNPACK_SUCCESS", "🎯 ПРЫЖОК В КУЧУ/ДИНАМИЧЕСКИЙ КОД: 0x%lx", x11_target);
+        }
+    }
+}
 
 uintptr_t get_module_base(const char* module_name) {
     FILE* maps = fopen("/proc/self/maps", "r");
@@ -30,52 +75,27 @@ uintptr_t get_module_base(const char* module_name) {
     return base;
 }
 
-void inspect_memory_safely() {
-    if (libstub_base == 0) {
+void* interception_thread(void* arg) {
+    while (libstub_base == 0) {
         libstub_base = get_module_base("libstub.so");
+        usleep(5000);
     }
     
-    if (libstub_base == 0) {
-        LOGI("[-] libstub.so не найдена в maps в данный момент.");
-        return;
-    }
+    LOGI("[+] libstub.so обнаружена по адресу: 0x%lx", libstub_base);
 
-    uintptr_t target_address = libstub_base + 0x5FA64;
-    LOGI("[+] База libstub.so: 0x%lx | Целевой адрес: 0x%lx", libstub_base, target_address);
+    uintptr_t hash_func = libstub_base + 0x8C894;
+    DobbyHook((void*)hash_func, (void*)my_sub_8C894, (void**)&orig_sub_8C894);
+    LOGI("[+] Защита CRC успешно активирована.");
 
-    uint32_t* code_ptr = (uint32_t*)target_address;
-    
-    LOGI("[👀] Снимок инструкций по смещению 0x5FA64:");
-    for (int i = 0; i < 8; i++) {
-        LOGI("    Address: 0x%lx | Opcode: 0x%08X", target_address + (i * 4), code_ptr[i]);
-    }
-}
+    uintptr_t target_br = libstub_base + 0x5FB88;
+    DobbyInstrument((void*)target_br, loc_5FB88_instrument_callback);
+    LOGI("[+] Инструмент на loc_5FB88 (BR X11) взведен!");
 
-int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) {
-    if (msg && !scanned) {
-        if (strstr(msg, "starting self-protect") != nullptr) {
-            scanned = true;
-            
-            int ret = orig_log_buf_write(bufID, priority, tag, msg);
-            
-            LOGI("[🎯] Сработал триггер лога! Код расшифрован. Начинаем чтение...");
-            inspect_memory_safely();
-            
-            return ret;
-        }
-    }
-
-    if (orig_log_buf_write) {
-        return orig_log_buf_write(bufID, priority, tag, msg);
-    }
-    return 0;
+    return nullptr;
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-    void* log_addr = DobbySymbolResolver("liblog.so", "__android_log_buf_write");
-    if (log_addr) {
-        DobbyHook(log_addr, (void*)my_log_buf_write, (void**)&orig_log_buf_write);
-    }
-
+    pthread_t th;
+    pthread_create(&th, nullptr, interception_thread, nullptr);
     return JNI_VERSION_1_6;
 }
