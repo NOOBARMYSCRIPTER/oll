@@ -6,10 +6,13 @@ set(CMAKE_CXX_STANDARD 11)
 include(FetchContent)
 FetchContent_Declare(
   dobby
-  GIT_REPOSITORY https://github.com/jmpews/Dobby.git
+  GIT_REPOSITORY https://github.com
   GIT_TAG        master
   SOURCE_DIR     ${CMAKE_CURRENT_BINARY_DIR}/dobby
 )
+
+set(Plugin.ClosureTrampoline OFF CACHE INTERNAL "Disable ClosureTrampoline module")
+
 FetchContent_MakeAvailable(dobby)
 
 add_library(oxide_bypass SHARED main.cpp)
