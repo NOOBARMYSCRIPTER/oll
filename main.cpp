@@ -4,6 +4,8 @@
 #include <string.h>
 #include <dlfcn.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <stdint.h>
