@@ -54,8 +54,33 @@ int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) 
     if (tag && msg) {
         if (strstr(tag, "SelfProtect") != nullptr || strstr(msg, "fork") != nullptr) {
             if (orig_log_buf_write) {
+                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] --------------------------------------------");
                 orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] Intercepted anti-cheat log!");
                 orig_log_buf_write(bufID, priority, tag, msg);
+
+                const size_t max_lines = 10;
+                void* buffer[max_lines];
+                size_t frames = capture_backtrace(buffer, max_lines);
+
+                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] --- BACKTRACE ---");
+                
+                for (size_t i = 0; i < frames; i++) {
+                    Dl_info info;
+                    char line_buf[512];
+                    
+                    if (dladdr(buffer[i], &info) && info.dli_fname) {
+                        uintptr_t relative_offset = (uintptr_t)buffer[i] - (uintptr_t)info.dli_fbase;
+                        
+                        snprintf(line_buf, sizeof(line_buf), "  #%02zu PC 0x%lx  %s (offset: 0x%lx) %s", 
+                                 i, (uintptr_t)buffer[i], info.dli_fname, relative_offset, 
+                                 info.dli_sname ? info.dli_sname : "");
+                    } else {
+                        snprintf(line_buf, sizeof(line_buf), "  #%02zu PC 0x%lx  [Unknown Module]", i, (uintptr_t)buffer[i]);
+                    }
+                    
+                    orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", line_buf);
+                }
+                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] --------------------------------------------");
             }
         }
     }
