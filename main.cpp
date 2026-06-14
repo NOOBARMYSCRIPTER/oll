@@ -51,34 +51,19 @@ size_t capture_backtrace(void** buffer, size_t max_lines) {
 int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
 
 int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) {
-    if (tag && (strstr(tag, "SelfProtect") != nullptr || (msg && strstr(msg, "fork") != nullptr))) {
-        LOGI("\n[NATIVE LOG DETECTED] [%s]: %s", tag, msg);
-        LOGI("--- NATIVE BACKTRACE START ---");
-
-        const size_t max_frames = 30;
-        void* buffer[max_frames];
-        size_t frames = capture_backtrace(buffer, max_frames);
-
-        for (size_t i = 0; i < frames; i++) {
-            void* addr = buffer[i];
-            Dl_info info;
-
-            if (dladdr(addr, &info) && info.dli_fname) {
-                uintptr_t offset = reinterpret_cast<uintptr_t>(addr) - reinterpret_cast<uintptr_t>(info.dli_fbase);
-                
-                LOGI("  #%02zu PC %p  %s (offset: 0x%lx) %s", 
-                     i, 
-                     addr, 
-                     info.dli_fname, 
-                     (unsigned long)offset, 
-                     info.dli_sname ? info.dli_sname : "");
-            } else {
-                LOGI("  #%02zu PC %p  [Unknown Module]", i, addr);
+    if (tag && msg) {
+        if (strstr(tag, "SelfProtect") != nullptr || strstr(msg, "fork") != nullptr) {
+            if (orig_log_buf_write) {
+                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] Intercepted anti-cheat log!");
+                orig_log_buf_write(bufID, priority, tag, msg);
             }
         }
-        LOGI("--- NATIVE BACKTRACE END ---\n");
     }
-    return orig_log_buf_write(bufID, priority, tag, msg);
+    
+    if (orig_log_buf_write) {
+        return orig_log_buf_write(bufID, priority, tag, msg);
+    }
+    return 0;
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
