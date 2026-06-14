@@ -17,13 +17,9 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: jmpews/Dobby
+        ref: v1.3.4
         path: dobby
         submodules: recursive
-
-    - name: Wipe out problematic assembly file
-      run: |
-        echo "" > dobby/source/TrampolineBridge/ClosureTrampolineBridge/arm64/closure_bridge_arm64.asm
-        echo "[+] Problematic assembly file successfully truncated to empty!"
 
     - name: Configure CMake
       run: |
