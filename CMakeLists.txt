@@ -3,7 +3,13 @@ project(oxide_bypass)
 
 set(CMAKE_CXX_STANDARD 11)
 
+set(ANDROID_ABI "x86_64")
+set(CMAKE_SYSTEM_NAME Android)
+set(CMAKE_SYSTEM_VERSION 24)
+
 set(DOBBY_PREBUILT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dobby_prebuilt)
+
+set(DOBBY_STATIC_LIB "${DOBBY_PREBUILT_DIR}/build/android/x86_64/libdobby.a")
 
 file(GLOB_RECURSE DOBBY_H_FILE "${DOBBY_PREBUILT_DIR}/*dobby.h")
 if(DOBBY_H_FILE)
@@ -12,14 +18,6 @@ if(DOBBY_H_FILE)
     message(STATUS "[+] Found Dobby include directory: ${DOBBY_INCLUDE_DIR}")
 else()
     message(FATAL_ERROR "[-] dobby.h not found in unpacked archive!")
-endif()
-
-file(GLOB_RECURSE DOBBY_A_FILE "${DOBBY_PREBUILT_DIR}/*libdobby.a")
-if(DOBBY_A_FILE)
-    list(GET DOBBY_A_FILE 0 DOBBY_STATIC_LIB)
-    message(STATUS "[+] Found Dobby static library: ${DOBBY_STATIC_LIB}")
-else()
-    message(FATAL_ERROR "[-] libdobby.a not found in unpacked archive!")
 endif()
 
 add_library(dobby STATIC IMPORTED)
