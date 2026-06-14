@@ -81,7 +81,7 @@ int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) 
     return orig_log_buf_write(bufID, priority, tag, msg);
 }
 
-JEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
     LOGI("[+] AUTO-INITIALIZING HOOKS VIA JNI_ONLOAD (HOUDINI STABLE)");
 
     void* fork_addr = DobbySymbolResolver("libc.so", "fork");
