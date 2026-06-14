@@ -3,8 +3,6 @@
 #include <android/log.h>
 #include <string.h>
 #include <unwind.h>
-#include <pthread.h>
-#include <unistd.h>
 #include <dlfcn.h>
 #include "dobby.h"
 
@@ -83,28 +81,19 @@ int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) 
     return orig_log_buf_write(bufID, priority, tag, msg);
 }
 
-void* hook_thread(void* arg) {
-    usleep(15000);
-    
+extern "C" JNIEXPORT void JNICALL
+Java_com_stub_StubApplication_initBypass(JNIEnv* env, jclass clazz) {
+    LOGI("[+] ИНИЦИАЛИЗАЦИЯ ХУКОВ ИЗ JAVA СЛОЯ (БЕЗОПАСНЫЙ ТАЙМИНГ)");
+
     void* fork_addr = DobbySymbolResolver("libc.so", "fork");
     if (fork_addr) {
         DobbyHook(fork_addr, (void*)my_fork, (void**)&orig_fork);
-        LOGI("[+] Native hook on fork() successfully installed via pthread.");
+        LOGI("[+] Хук на fork() успешно установлен.");
     }
 
     void* log_addr = DobbySymbolResolver("liblog.so", "__android_log_buf_write");
     if (log_addr) {
         DobbyHook(log_addr, (void*)my_log_buf_write, (void**)&orig_log_buf_write);
-        LOGI("[+] Native hook on __android_log_buf_write successfully installed via pthread.");
+        LOGI("[+] Хук на __android_log_buf_write успешно установлен.");
     }
-    
-    return nullptr;
-}
-
-__attribute__((constructor)) void init() {
-    LOGI("[+] NATIVE BYPASS LAUNCHED VIA DT_NEEDED!");
-
-    pthread_t thread;
-    pthread_create(&thread, nullptr, hook_thread, nullptr);
-    pthread_detach(thread);
 }
