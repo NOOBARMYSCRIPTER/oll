@@ -55,33 +55,25 @@ int my_log_buf_write(int bufID, int priority, const char* tag, const char* msg) 
     if (tag && msg) {
         if (strstr(tag, "SelfProtect") != nullptr || strstr(msg, "fork") != nullptr) {
             if (orig_log_buf_write) {
-                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] --------------------------------------------");
-                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] Intercepted anti-cheat log!");
+                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] ==========================================");
                 orig_log_buf_write(bufID, priority, tag, msg);
 
-                const size_t max_lines = 10;
-                void* buffer[max_lines];
-                size_t frames = capture_backtrace(buffer, max_lines);
-
-                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] --- BACKTRACE ---");
+                void* return_address = __builtin_return_address(0); 
                 
-                for (size_t i = 0; i < frames; i++) {
-                    Dl_info info;
-                    char line_buf[512];
-                    
-                    if (dladdr(buffer[i], &info) && info.dli_fname) {
-                        uintptr_t relative_offset = (uintptr_t)buffer[i] - (uintptr_t)info.dli_fbase;
-                        
-                        snprintf(line_buf, sizeof(line_buf), "  #%02zu PC 0x%lx  %s (offset: 0x%lx) %s", 
-                                 i, (uintptr_t)buffer[i], info.dli_fname, relative_offset, 
-                                 info.dli_sname ? info.dli_sname : "");
-                    } else {
-                        snprintf(line_buf, sizeof(line_buf), "  #%02zu PC 0x%lx  [Unknown Module]", i, (uintptr_t)buffer[i]);
-                    }
-                    
-                    orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", line_buf);
+                Dl_info info;
+                if (dladdr(return_address, &info) && info.dli_fname) {
+                    uintptr_t offset = (uintptr_t)return_address - (uintptr_t)info.dli_fbase;
+                    char direct_call_buf[512];
+                    snprintf(direct_call_buf, sizeof(direct_call_buf), 
+                             "[+] TRUE ANTI-CHEAT CALL FROM: %s (IDA Offset: 0x%lx)", 
+                             info.dli_fname, offset);
+                    orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", direct_call_buf);
+                } else {
+                    char direct_call_buf[128];
+                    snprintf(direct_call_buf, sizeof(direct_call_buf), "[+] Raw caller address: %p", return_address);
+                    orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", direct_call_buf);
                 }
-                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] --------------------------------------------");
+                orig_log_buf_write(bufID, priority, "BYPASS_DEBUG", "[+] ==========================================");
             }
         }
     }
