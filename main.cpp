@@ -15,7 +15,6 @@ struct BacktraceState {
     void** end;
 };
 
-int (*orig_log_buf_write)(int bufID, int priority, const char* tag, const char* msg);
 pid_t (*orig_fork)();
 
 pid_t my_fork() {
@@ -23,21 +22,25 @@ pid_t my_fork() {
     
     if (orig_log_buf_write) {
         Dl_info info;
+        char fork_buf[512]; 
+        
         if (dladdr(return_address, &info) && info.dli_fname) {
             uintptr_t offset = (uintptr_t)return_address - (uintptr_t)info.dli_fbase;
-            char fork_buf;
+            
             snprintf(fork_buf, sizeof(fork_buf), 
                      "🚨 [FORK DETECTED] Called fork() from: %s (IDA Offset: 0x%lx)", 
                      info.dli_fname, offset);
-            orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", fork_buf);
         } else {
-            char fork_buf;
-            snprintf(fork_buf, sizeof(fork_buf), "🚨 [FORK DETECTED] Raw caller address: %p", return_address);
-            orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", fork_buf);
+            snprintf(fork_buf, sizeof(fork_buf), 
+                     "🚨 [FORK DETECTED] Raw caller address: %p", 
+                     return_address);
         }
+        
+        orig_log_buf_write(0, ANDROID_LOG_WARN, "BYPASS_DEBUG", fork_buf);
     }
 
     if (!orig_fork) return 0;
+    
     pid_t res = orig_fork();
     if (res > 0) {
         if (orig_log_buf_write) {
